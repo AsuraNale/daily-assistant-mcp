@@ -1,4 +1,4 @@
-# 日常小助手 MCP Server
+# daily-assistant MCP Server
 
 > AI-powered daily task management via MCP (Model Context Protocol)
 
