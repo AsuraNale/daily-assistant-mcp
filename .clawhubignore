@@ -1,0 +1,13 @@
+# Tests
+src/test_*.py
+
+# Internal project documents
+Phase *.md
+*测试*.md
+项目计划.md
+3-30 *.md
+
+# Dev artifacts
+__pycache__/
+*.pyc
+config.json
