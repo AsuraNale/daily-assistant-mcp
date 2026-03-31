@@ -34,6 +34,7 @@ from core import (
     PRIORITY_LABEL, format_deadline_label,
     scan_overdue_files,
     find_latest_daily, extract_uncompleted_tasks, create_today_file,
+    mark_tasks_inherited,
     parse_all_tasks, generate_review as _generate_review_text,
     scan_split_needed,
 )
@@ -188,10 +189,13 @@ def inherit_tasks(date: str = "") -> str:
     source_date = latest.stem
     create_today_file(DAILY_DIR, today, uncompleted, source_date)
 
+    # 标记源文件中的任务为已继承，避免重复计数
+    marked = mark_tasks_inherited(latest, today_str)
+
     task_list = "\n".join(f"  {t}" for t in uncompleted)
     return (
         f"✅ 已创建 {today_str}.md\n"
-        f"继承自: {latest.name}\n"
+        f"继承自: {latest.name}（{marked} 个任务已标记为已继承）\n"
         f"继承任务数: {len(uncompleted)}\n\n"
         f"{task_list}"
     )

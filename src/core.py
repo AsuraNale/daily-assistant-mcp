@@ -310,6 +310,35 @@ def create_today_file(
     return file_path
 
 
+def mark_tasks_inherited(file_path: Path, target_date: str) -> int:
+    """将源文件中的未完成任务标记为已继承。
+
+    - [ ] 任务  →  - [>] 任务 ➡️ YYYY-MM-DD
+
+    已标记 [>] 的任务不会被 check_overdue / recommend_next 等函数匹配，
+    从而避免继承后的重复计数。
+
+    返回标记的任务数量。
+    """
+    content = file_path.read_text(encoding="utf-8")
+    lines = content.split("\n")
+    count = 0
+
+    for i, line in enumerate(lines):
+        stripped = line.strip()
+        if stripped.startswith("- [ ] "):
+            # 保留原始缩进
+            indent = line[: len(line) - len(line.lstrip())]
+            task_text = stripped[6:]
+            lines[i] = f"{indent}- [>] {task_text} ➡️ {target_date}"
+            count += 1
+
+    if count > 0:
+        file_path.write_text("\n".join(lines), encoding="utf-8")
+
+    return count
+
+
 # ============================================================
 # 日终回顾（来源: daily_review.py）
 # ============================================================

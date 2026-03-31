@@ -1,7 +1,7 @@
 ---
 name: daily-assistant
 description: "AI-powered daily task management MCP Server — recommend next task, inherit uncompleted todos, detect overdue, generate reviews. Deterministic ops in code (zero tokens), AI only when needed."
-version: 1.0.1
+version: 2.0.0
 metadata:
   openclaw:
     requires:
