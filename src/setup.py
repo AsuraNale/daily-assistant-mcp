@@ -1,25 +1,66 @@
 """
-日常小助手 MCP Server — 首次初始化脚本
+日常小助手 MCP Server — 初始化脚本 v2
 
-运行后自动完成：
+两种模式：
+  --auto    全自动（零交互，默认路径，自动配置已安装的编辑器）
+  无参数     交互式（询问路径，打印配置模板）
+
+自动完成：
 1. 创建数据目录（Daily/ + Dashboard.md）
-2. 生成 config.json（路径适配当前 OS）
-3. 打印 .mcp.json 配置模板 + 安装指令
+2. 生成 config.json
+3. 检测已安装的 AI 编辑器，自动写入 MCP 配置
 
-支持 Windows / macOS / Linux。
+支持的编辑器：Claude Code / Cursor / Kiro / Windsurf
 
 用法:
-    Windows:  py setup.py
-    macOS:    python3 setup.py
+    Windows:  py src/setup.py --auto
+    macOS:    python3 src/setup.py --auto
 """
 
 import json
 import platform
+import shutil
 import sys
 from pathlib import Path
 
 SCRIPT_DIR = Path(__file__).parent.resolve()
+SERVER_PATH = SCRIPT_DIR / "server.py"
 
+# ─── AI 编辑器 MCP 配置映射 ───────────────────────────────────
+
+EDITORS = [
+    {
+        "name": "Claude Code",
+        "config_path": Path.home() / ".claude.json",
+        "detect_dir": Path.home() / ".claude",
+        "detect_cmd": "claude",
+        "create_parents": False,
+    },
+    {
+        "name": "Cursor",
+        "config_path": Path.home() / ".cursor" / "mcp.json",
+        "detect_dir": Path.home() / ".cursor",
+        "detect_cmd": None,
+        "create_parents": True,
+    },
+    {
+        "name": "Kiro",
+        "config_path": Path.home() / ".kiro" / "settings" / "mcp.json",
+        "detect_dir": Path.home() / ".kiro",
+        "detect_cmd": None,
+        "create_parents": True,
+    },
+    {
+        "name": "Windsurf",
+        "config_path": Path.home() / ".codeium" / "windsurf" / "mcp_config.json",
+        "detect_dir": Path.home() / ".codeium" / "windsurf",
+        "detect_cmd": None,
+        "create_parents": True,
+    },
+]
+
+
+# ─── 工具函数 ─────────────────────────────────────────────────
 
 def detect_python_cmd() -> str:
     """检测当前 OS 的 Python 命令。"""
@@ -28,8 +69,84 @@ def detect_python_cmd() -> str:
     return "python3"
 
 
+def build_mcp_entry() -> dict:
+    """构建 daily-assistant 的 MCP Server 配置条目。"""
+    return {
+        "command": detect_python_cmd(),
+        "args": ["-X", "utf8", str(SERVER_PATH)],
+    }
+
+
+# ─── 编辑器检测与配置 ─────────────────────────────────────────
+
+def detect_editor(editor: dict) -> bool:
+    """检测某个 AI 编辑器是否已安装。"""
+    if editor["config_path"].exists():
+        return True
+    if editor["detect_dir"] and editor["detect_dir"].is_dir():
+        return True
+    if editor["detect_cmd"] and shutil.which(editor["detect_cmd"]):
+        return True
+    return False
+
+
+def merge_mcp_config(config_path: Path, entry: dict, create_parents: bool) -> None:
+    """将 daily-assistant 合并写入编辑器的 MCP 配置文件。
+
+    安全合并：读取现有 JSON → 添加/覆盖 daily-assistant → 写回。
+    不会影响用户已有的其他 MCP Server 配置。
+    """
+    existing = {}
+    if config_path.exists():
+        try:
+            text = config_path.read_text(encoding="utf-8").strip()
+            if text:
+                existing = json.loads(text)
+        except (json.JSONDecodeError, OSError):
+            existing = {}
+
+    if "mcpServers" not in existing:
+        existing["mcpServers"] = {}
+
+    existing["mcpServers"]["daily-assistant"] = entry
+
+    if create_parents:
+        config_path.parent.mkdir(parents=True, exist_ok=True)
+
+    config_path.write_text(
+        json.dumps(existing, ensure_ascii=False, indent=2) + "\n",
+        encoding="utf-8",
+    )
+
+
+def configure_editors() -> tuple[list[str], list[str]]:
+    """检测并配置所有已安装的 AI 编辑器。返回 (已配置列表, 跳过列表)。"""
+    entry = build_mcp_entry()
+    configured = []
+    skipped = []
+
+    for editor in EDITORS:
+        name = editor["name"]
+        if detect_editor(editor):
+            try:
+                merge_mcp_config(
+                    editor["config_path"], entry, editor["create_parents"]
+                )
+                print(f"   ✅ {name} 已配置 → {editor['config_path']}")
+                configured.append(name)
+            except OSError as e:
+                print(f"   ⚠️ {name} 配置失败: {e}")
+        else:
+            print(f"   ⏭️  {name} 未检测到，跳过")
+            skipped.append(name)
+
+    return configured, skipped
+
+
+# ─── 数据目录 & config.json ───────────────────────────────────
+
 def prompt_data_dir() -> Path:
-    """询问用户数据目录位置。"""
+    """交互式询问数据目录位置。"""
     default = Path.home() / "Desktop" / "日常小助手"
     print(f"\n📁 数据目录将存放 Daily 文件、Dashboard 等。")
     print(f"   默认位置: {default}")
@@ -46,7 +163,6 @@ def create_data_dir(data_dir: Path) -> None:
     daily_dir.mkdir(parents=True, exist_ok=True)
     print(f"   ✅ 创建: {daily_dir}")
 
-    # Dashboard.md
     dashboard = data_dir / "Dashboard.md"
     if not dashboard.exists():
         dashboard.write_text(
@@ -82,24 +198,29 @@ def create_config(data_dir: Path) -> None:
     print(f"   ✅ 生成: {config_path}")
 
 
-def print_next_steps(data_dir: Path) -> None:
-    """打印后续步骤。"""
-    python_cmd = detect_python_cmd()
-    server_path = SCRIPT_DIR / "server.py"
+# ─── 输出提示 ─────────────────────────────────────────────────
 
-    # 根据 OS 格式化路径
-    if platform.system() == "Windows":
-        server_path_str = str(server_path).replace("/", "\\")
-        path_escaped = json.dumps(server_path_str)  # 自动转义反斜杠
-    else:
-        server_path_str = str(server_path)
-        path_escaped = json.dumps(server_path_str)
+def print_manual_config() -> None:
+    """打印手动配置模板（未检测到编辑器时使用）。"""
+    entry = build_mcp_entry()
+    mcp_json = {"mcpServers": {"daily-assistant": entry}}
+
+    print(f"\n📝 手动配置模板（复制到你的编辑器 MCP 配置文件）：")
+    print(json.dumps(mcp_json, ensure_ascii=False, indent=2))
+    print(f"\n   各编辑器配置文件位置：")
+    for editor in EDITORS:
+        print(f"   • {editor['name']}: {editor['config_path']}")
+
+
+def print_next_steps_interactive(data_dir: Path) -> None:
+    """交互模式的后续步骤提示。"""
+    python_cmd = detect_python_cmd()
 
     mcp_json = {
         "mcpServers": {
             "daily-assistant": {
                 "command": python_cmd,
-                "args": ["-X", "utf8", server_path_str],
+                "args": ["-X", "utf8", str(SERVER_PATH)],
             }
         }
     }
@@ -112,16 +233,18 @@ def print_next_steps(data_dir: Path) -> None:
     print(f"\n📦 步骤 1: 安装 fastmcp")
     print(f"   {python_cmd} -m pip install fastmcp")
 
-    print(f"\n📝 步骤 2: 配置 Claude Code")
-    print(f"   在你的项目根目录创建 .mcp.json，内容如下：")
+    print(f"\n📝 步骤 2: 配置你的 AI 编辑器")
+    print(f"   将以下 JSON 合并到编辑器的 MCP 配置文件中：")
     print(f"\n{mcp_json_str}")
+    print(f"\n   各编辑器配置文件位置：")
+    for editor in EDITORS:
+        print(f"   • {editor['name']}: {editor['config_path']}")
 
-    print(f"\n🚀 步骤 3: 启动 Claude Code")
-    print(f"   在包含 .mcp.json 的目录下启动 claude")
-    print(f"   MCP Server 会自动加载，输入 /mcp 确认")
+    print(f"\n🚀 步骤 3: 重启编辑器")
+    print(f"   MCP Server 会自动加载")
 
     print(f"\n📅 步骤 4: 创建今日待办")
-    print(f"   在 Claude Code 中说: \"用 inherit_tasks 创建今天的待办\"")
+    print(f"   说: \"用 inherit_tasks 创建今天的待办\"")
     print(f"   或手动在 {data_dir / 'Daily'} 中创建 YYYY-MM-DD.md 文件")
 
     print(f"\n💡 任务格式:")
@@ -129,25 +252,58 @@ def print_next_steps(data_dir: Path) -> None:
     print(f"   标记: ⏱️=预估时间 📅=deadline ⏫=最高优先 🔼=高 🔽=低")
 
 
+# ─── 主入口 ───────────────────────────────────────────────────
+
 def main():
+    auto_mode = "--auto" in sys.argv
+
     print("=" * 50)
     print("🛠️  日常小助手 MCP Server — 初始化向导")
+    if auto_mode:
+        print("   模式: 🚀 全自动 (--auto)")
+    else:
+        print("   模式: 💬 交互式")
     print("=" * 50)
     print(f"\n   系统: {platform.system()} {platform.release()}")
     print(f"   Python: {sys.version.split()[0]}")
     print(f"   脚本目录: {SCRIPT_DIR}")
 
-    # 1. 数据目录
-    data_dir = prompt_data_dir()
+    # ── 1. 数据目录 ──
+    if auto_mode:
+        data_dir = Path.home() / "Desktop" / "日常小助手"
+    else:
+        data_dir = prompt_data_dir()
+
     print(f"\n📂 创建数据目录...")
     create_data_dir(data_dir)
 
-    # 2. config.json
+    # ── 2. config.json ──
     print(f"\n⚙️  生成配置文件...")
     create_config(data_dir)
 
-    # 3. 后续步骤
-    print_next_steps(data_dir)
+    # ── 3. 编辑器配置 ──
+    if auto_mode:
+        print(f"\n🔍 检测已安装的 AI 编辑器...")
+        configured, skipped = configure_editors()
+
+        if not configured:
+            print_manual_config()
+
+        print(f"\n{'='*50}")
+        print(f"🎉 全部完成！")
+        print(f"{'='*50}")
+
+        if configured:
+            print(f"\n   已配置: {', '.join(configured)}")
+            print(f"   打开你的 AI 编辑器，说 \"今天做什么\" 即可开始使用。")
+        else:
+            print(f"\n   未检测到支持的编辑器，请手动复制上方配置模板。")
+
+        print(f"\n💡 任务格式:")
+        print(f"   - [ ] 任务描述 ⏱️45min 📅 2026-03-30 ⏫")
+        print(f"   标记: ⏱️=预估时间 📅=deadline ⏫=最高优先 🔼=高 🔽=低")
+    else:
+        print_next_steps_interactive(data_dir)
 
 
 if __name__ == "__main__":
