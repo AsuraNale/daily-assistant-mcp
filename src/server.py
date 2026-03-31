@@ -1,8 +1,8 @@
 """
-日常小助手 MCP Server — Phase 3（独立化版本）
+日常小助手 MCP Server — v2.1（双语版本）
 
 自包含 MCP Server：core.py + config.json，不依赖 Obsidian。
-通过 stdio 连接 Claude Code / OpenClaw。
+通过 stdio 连接 Claude Code / Cursor / Kiro / Windsurf。
 
 Tools (6):
   - recommend_next  — 推荐下一步行动
@@ -31,12 +31,13 @@ from fastmcp import FastMCP
 
 from core import (
     parse_task, rank_tasks, format_recommendation,
-    PRIORITY_LABEL, format_deadline_label,
+    format_deadline_label,
     scan_overdue_files,
     find_latest_daily, extract_uncompleted_tasks, create_today_file,
     mark_tasks_inherited,
     parse_all_tasks, generate_review as _generate_review_text,
     scan_split_needed,
+    t,
 )
 
 
@@ -74,6 +75,7 @@ _config = load_config(_config_path)
 
 DAILY_DIR = Path(_config["daily_dir"])
 DASHBOARD_FILE = Path(_config.get("dashboard_file", str(DAILY_DIR.parent / "Dashboard.md")))
+LANG = _config.get("language", "zh")
 
 
 # ============================================================
@@ -108,105 +110,105 @@ mcp = FastMCP(
 
 @mcp.tool()
 def recommend_next(date: str = "") -> str:
-    """推荐用户接下来应该做什么任务。
+    """Recommend the next task the user should work on.
 
-    扫描指定日期的 Daily 文件中的未完成任务，
-    按优先级和 deadline 排序，返回最应该做的任务及行动建议。
+    Scans the Daily file for the given date, ranks incomplete tasks
+    by priority and deadline, and returns the top recommendation.
 
     Args:
-        date: 日期，格式 YYYY-MM-DD。留空则默认今天。
+        date: Date in YYYY-MM-DD format. Defaults to today.
     """
     today = datetime.strptime(date, "%Y-%m-%d") if date else datetime.now()
     today_str = today.strftime("%Y-%m-%d")
     today_file = DAILY_DIR / f"{today_str}.md"
 
     if not today_file.exists():
-        return f"⚠️ 今日待办文件不存在: {today_str}.md\n先运行 inherit_tasks 或手动创建今日文件。"
+        return t("srv_no_daily_file", LANG, file=f"{today_str}.md")
 
     content = today_file.read_text(encoding="utf-8")
     tasks = [parse_task(line, today) for line in content.split("\n")]
-    tasks = [t for t in tasks if t]
+    tasks = [tk for tk in tasks if tk]
 
     if not tasks:
         has_completed = any(
             l.strip().startswith("- [x] ") for l in content.split("\n")
         )
         if has_completed:
-            return "🎉 今日任务清零！所有任务都已完成，干得漂亮！"
+            return t("all_done", LANG)
         else:
-            return f"📝 今日还没有添加任务。打开 Daily/{today_str}.md 添加今天的任务吧。"
+            return t("srv_no_tasks_yet", LANG, file=f"{today_str}.md")
 
     ranked = rank_tasks(tasks)
-    return format_recommendation(ranked, today)
+    return format_recommendation(ranked, today, LANG)
 
 
 @mcp.tool()
 def get_today(date: str = "") -> str:
-    """读取指定日期的 Daily 待办文件完整内容。
+    """Read the full content of a Daily file.
 
     Args:
-        date: 日期，格式 YYYY-MM-DD。留空则默认今天。
+        date: Date in YYYY-MM-DD format. Defaults to today.
     """
     today = datetime.strptime(date, "%Y-%m-%d") if date else datetime.now()
     today_str = today.strftime("%Y-%m-%d")
     today_file = DAILY_DIR / f"{today_str}.md"
 
     if not today_file.exists():
-        return f"⚠️ 文件不存在: Daily/{today_str}.md"
+        return t("srv_file_not_exist", LANG, file=f"{today_str}.md")
 
     content = today_file.read_text(encoding="utf-8")
-    return f"📄 Daily/{today_str}.md\n\n{content}"
+    return f"{t('srv_file_header', LANG, file=f'{today_str}.md')}\n\n{content}"
 
 
 @mcp.tool()
 def inherit_tasks(date: str = "") -> str:
-    """将前一天未完成的任务继承到指定日期的 Daily 文件中。
+    """Inherit incomplete tasks from the previous day into a new Daily file.
 
-    如果目标日期的 Daily 文件已存在，则不会覆盖。
+    Will not overwrite if the target file already exists.
 
     Args:
-        date: 目标日期，格式 YYYY-MM-DD。留空则默认今天。
+        date: Target date in YYYY-MM-DD format. Defaults to today.
     """
     today = datetime.strptime(date, "%Y-%m-%d") if date else datetime.now()
     today_str = today.strftime("%Y-%m-%d")
     today_file = DAILY_DIR / f"{today_str}.md"
 
     if today_file.exists():
-        return f"⚠️ 今日文件已存在: {today_str}.md，不会覆盖。"
+        return t("srv_already_exists", LANG, file=f"{today_str}.md")
 
     latest = find_latest_daily(DAILY_DIR, before_date=today)
 
     if not latest:
-        create_today_file(DAILY_DIR, today, [], None)
-        return f"📭 未找到之前的待办文件。已创建空白的 {today_str}.md。"
+        create_today_file(DAILY_DIR, today, [], None, LANG)
+        return t("srv_no_previous", LANG, file=f"{today_str}.md")
 
     uncompleted = extract_uncompleted_tasks(latest)
 
     if not uncompleted:
-        create_today_file(DAILY_DIR, today, [], None)
-        return f"🎉 {latest.name} 中所有任务已完成！已创建空白的 {today_str}.md。"
+        create_today_file(DAILY_DIR, today, [], None, LANG)
+        return t("srv_all_completed", LANG, src=latest.name, file=f"{today_str}.md")
 
     source_date = latest.stem
-    create_today_file(DAILY_DIR, today, uncompleted, source_date)
+    create_today_file(DAILY_DIR, today, uncompleted, source_date, LANG)
 
     # 标记源文件中的任务为已继承，避免重复计数
     marked = mark_tasks_inherited(latest, today_str)
 
-    task_list = "\n".join(f"  {t}" for t in uncompleted)
+    task_list = "\n".join(f"  {tk}" for tk in uncompleted)
     return (
-        f"✅ 已创建 {today_str}.md\n"
-        f"继承自: {latest.name}（{marked} 个任务已标记为已继承）\n"
-        f"继承任务数: {len(uncompleted)}\n\n"
-        f"{task_list}"
+        t("srv_inherit_done", LANG,
+          file=f"{today_str}.md", src=latest.name,
+          marked=marked, count=len(uncompleted))
+        + f"\n\n{task_list}"
     )
 
 
 @mcp.tool()
 def check_overdue(date: str = "") -> str:
-    """检测所有超期的 Daily 文件（日期已过但仍有未完成任务）。
+    """Detect all overdue Daily files (past dates with incomplete tasks).
 
     Args:
-        date: 当前日期，格式 YYYY-MM-DD。留空则默认今天。
+        date: Current date in YYYY-MM-DD format. Defaults to today.
     """
     today = datetime.strptime(date, "%Y-%m-%d") if date else datetime.now()
     today_str = today.strftime("%Y-%m-%d")
@@ -214,76 +216,79 @@ def check_overdue(date: str = "") -> str:
     overdue = scan_overdue_files(DAILY_DIR, today)
 
     if not overdue:
-        return f"✅ 没有超期任务（截至 {today_str}），所有待办都已完成！"
+        return t("srv_no_overdue", LANG, date=today_str)
 
     total_tasks = sum(len(item["uncompleted"]) for item in overdue)
-    lines = [f"⚠️ 发现 {len(overdue)} 个超期文件，共 {total_tasks} 个未完成任务：\n"]
+    lines = [t("srv_overdue_found", LANG, files=len(overdue), tasks=total_tasks), ""]
 
     for item in overdue:
-        lines.append(f"📄 {item['date']}.md（{item['days_ago']}天前）")
+        lines.append(t("srv_overdue_file", LANG, date=item["date"], days=item["days_ago"]))
         for task in item["uncompleted"]:
             lines.append(f"   {task}")
         lines.append("")
 
-    lines.append("💡 建议：运行 inherit_tasks 将未完成项带到今天。")
+    lines.append(t("srv_overdue_tip", LANG))
     return "\n".join(lines)
 
 
 @mcp.tool()
 def generate_review(date: str = "", write: bool = True) -> str:
-    """生成指定日期的日终回顾（完成率 + 时间统计 + 明日建议）。
+    """Generate an end-of-day review (completion rate + time stats + suggestions).
 
     Args:
-        date: 日期，格式 YYYY-MM-DD。留空则默认今天。
-        write: 是否写入 Daily 文件。默认 True。
+        date: Date in YYYY-MM-DD format. Defaults to today.
+        write: Whether to write the review into the Daily file. Default True.
     """
     today = datetime.strptime(date, "%Y-%m-%d") if date else datetime.now()
     today_str = today.strftime("%Y-%m-%d")
     today_file = DAILY_DIR / f"{today_str}.md"
 
     if not today_file.exists():
-        return f"⚠️ 今日待办文件不存在: {today_str}.md"
+        return t("srv_no_daily_file", LANG, file=f"{today_str}.md")
 
     content = today_file.read_text(encoding="utf-8")
     completed, uncompleted = parse_all_tasks(content)
 
     total = len(completed) + len(uncompleted)
     if total == 0:
-        return "📝 今日没有任何任务记录。"
+        return t("srv_no_task_record", LANG)
 
-    review = _generate_review_text(completed, uncompleted, today_str)
+    review = _generate_review_text(completed, uncompleted, today_str, LANG)
 
     if write:
         marker = "## 📊 日终回顾（自动生成"
-        if marker in content:
-            parts = content.split(marker)
+        marker_en = "## 📊 Daily Review (auto-generated"
+        if marker in content or marker_en in content:
+            split_marker = marker if marker in content else marker_en
+            parts = content.split(split_marker)
             before = parts[0].rstrip()
             new_content = before + "\n\n" + review + "\n"
         else:
             manual_marker = "## 📊 日终回顾"
+            manual_marker_en = "## 📊 End of Day Review"
             if manual_marker in content:
                 idx = content.index(manual_marker)
+                before = content[:idx].rstrip()
+                new_content = before + "\n\n" + review + "\n"
+            elif manual_marker_en in content:
+                idx = content.index(manual_marker_en)
                 before = content[:idx].rstrip()
                 new_content = before + "\n\n" + review + "\n"
             else:
                 new_content = content.rstrip() + "\n\n" + review + "\n"
 
         today_file.write_text(new_content, encoding="utf-8")
-        return f"{review}\n\n✅ 回顾已写入 Daily/{today_str}.md"
+        return f"{review}\n\n{t('srv_review_written', LANG, file=f'{today_str}.md')}"
 
     return review
 
 
 @mcp.tool()
 def scan_split(date: str = "") -> str:
-    """检测今日 Daily 文件中需要拆分的任务。
-
-    检测规则：
-    - 预估时间 > 80min → 建议拆分
-    - 没有预估时间标记 → 建议补上
+    """Detect tasks that need splitting (>80min or missing time estimate).
 
     Args:
-        date: 日期，格式 YYYY-MM-DD。留空则默认今天。
+        date: Date in YYYY-MM-DD format. Defaults to today.
     """
     today = datetime.strptime(date, "%Y-%m-%d") if date else datetime.now()
     today_str = today.strftime("%Y-%m-%d")
@@ -291,25 +296,25 @@ def scan_split(date: str = "") -> str:
     issues = scan_split_needed(DAILY_DIR, today)
 
     if not issues:
-        return f"✅ {today_str} 的所有任务预估时间合理，无需拆分。"
+        return t("srv_split_ok", LANG, date=today_str)
 
     too_long = [i for i in issues if i["type"] == "too_long"]
     no_est = [i for i in issues if i["type"] == "no_estimate"]
 
     lines = []
     if too_long:
-        lines.append(f"✂️ 以下 {len(too_long)} 个任务超过 80min，建议拆分：")
+        lines.append(t("srv_split_too_long", LANG, n=len(too_long)))
         for item in too_long:
             lines.append(f"  ⚠️ 『{item['description']}』— {item['minutes']}min")
         lines.append("")
 
     if no_est:
-        lines.append(f"📝 以下 {len(no_est)} 个任务缺少预估时间：")
+        lines.append(t("srv_split_no_est", LANG, n=len(no_est)))
         for item in no_est:
             lines.append(f"  ❓ 『{item['description']}』")
         lines.append("")
 
-    lines.append("💡 建议让 AI 帮你拆分大任务为多个 ≤ 45min 的子任务。")
+    lines.append(t("srv_split_tip", LANG))
     return "\n".join(lines)
 
 
@@ -324,7 +329,7 @@ def resource_today() -> str:
     today_file = DAILY_DIR / f"{today_str}.md"
 
     if not today_file.exists():
-        return f"⚠️ 今日文件不存在: {today_str}.md"
+        return t("srv_file_not_exist", LANG, file=f"{today_str}.md")
     return today_file.read_text(encoding="utf-8")
 
 
@@ -340,8 +345,9 @@ def resource_dashboard() -> str:
 def resource_history() -> str:
     """最近 7 天的任务完成统计。"""
     today = datetime.now()
-    lines = ["📊 最近 7 天任务完成统计\n"]
-    lines.append("| 日期 | 完成 | 未完成 | 完成率 |")
+    hdr = t("srv_history_hdr", LANG)
+    lines = [t("srv_history_title", LANG), ""]
+    lines.append(f"| {hdr[0]} | {hdr[1]} | {hdr[2]} | {hdr[3]} |")
     lines.append("|------|:----:|:------:|:------:|")
 
     for i in range(7):
@@ -350,7 +356,7 @@ def resource_history() -> str:
         day_file = DAILY_DIR / f"{day_str}.md"
 
         if not day_file.exists():
-            lines.append(f"| {day_str} | — | — | 无文件 |")
+            lines.append(f"| {day_str} | — | — | {t('srv_no_file', LANG)} |")
             continue
 
         content = day_file.read_text(encoding="utf-8")
@@ -358,7 +364,7 @@ def resource_history() -> str:
         total = len(completed) + len(uncompleted)
 
         if total == 0:
-            lines.append(f"| {day_str} | 0 | 0 | 无任务 |")
+            lines.append(f"| {day_str} | 0 | 0 | {t('srv_no_tasks', LANG)} |")
         else:
             pct = round(len(completed) / total * 100)
             lines.append(f"| {day_str} | {len(completed)} | {len(uncompleted)} | {pct}% |")

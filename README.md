@@ -123,9 +123,22 @@ Data directory (user-configurable):
 ```json
 {
   "daily_dir": "/Users/you/Desktop/日常小助手/Daily",
-  "dashboard_file": "/Users/you/Desktop/日常小助手/Dashboard.md"
+  "dashboard_file": "/Users/you/Desktop/日常小助手/Dashboard.md",
+  "language": "zh"
 }
 ```
+
+### Language / 语言
+
+Set `"language"` in `config.json` to switch all tool output between Chinese and English:
+
+| Value | Language | Example output |
+|-------|---------|---------------|
+| `"zh"` | 中文 (default) | 🎉 今日任务清零！ |
+| `"en"` | English | 🎉 All tasks done! |
+
+> **Note**: MCP tool names and descriptions remain in English (MCP standard).
+> Only the **output text** (recommendations, reviews, status messages) is affected.
 
 You can also pass a custom config path:
 ```bash

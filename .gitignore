@@ -2,3 +2,6 @@ __pycache__/
 *.pyc
 config.json
 .venv/
+src/test_*.py
+项目 1.0/
+项目 2.0/

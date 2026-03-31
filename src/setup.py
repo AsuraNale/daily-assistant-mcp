@@ -248,6 +248,7 @@ def create_config(data_dir: Path) -> None:
     config = {
         "daily_dir": str(data_dir / "Daily"),
         "dashboard_file": str(data_dir / "Dashboard.md"),
+        "language": "zh",
     }
 
     config_path.write_text(

@@ -3,6 +3,7 @@
 
 从 5 个源脚本中提取的纯函数，零外部依赖（仅标准库）。
 所有函数接受 daily_dir: Path 参数，不硬编码任何路径。
+支持中英文双语输出（lang="zh" / "en"）。
 
 来源映射：
   - next_action.py   → parse_task, rank_tasks, generate_steps, format_*
@@ -18,7 +19,151 @@ from pathlib import Path
 
 
 # ============================================================
-# 常量
+# 国际化（i18n）
+# ============================================================
+
+I18N = {
+    # ── 优先级标签 ──
+    "priority_highest":     {"zh": "最高 ⏫",   "en": "Highest ⏫"},
+    "priority_high":        {"zh": "高 🔼",     "en": "High 🔼"},
+    "priority_medium":      {"zh": "普通",       "en": "Normal"},
+    "priority_low":         {"zh": "低 🔽",     "en": "Low 🔽"},
+
+    # ── 星期 ──
+    "weekday_0": {"zh": "周一", "en": "Mon"},
+    "weekday_1": {"zh": "周二", "en": "Tue"},
+    "weekday_2": {"zh": "周三", "en": "Wed"},
+    "weekday_3": {"zh": "周四", "en": "Thu"},
+    "weekday_4": {"zh": "周五", "en": "Fri"},
+    "weekday_5": {"zh": "周六", "en": "Sat"},
+    "weekday_6": {"zh": "周日", "en": "Sun"},
+
+    # ── deadline 标签 ──
+    "no_deadline":          {"zh": "无 deadline",               "en": "No deadline"},
+    "overdue_days":         {"zh": "已超期 {n} 天！",           "en": "Overdue by {n} days!"},
+    "deadline_today":       {"zh": "今天！",                     "en": "Today!"},
+    "deadline_tomorrow":    {"zh": "明天",                       "en": "Tomorrow"},
+    "deadline_in_days":     {"zh": "{n} 天后",                   "en": "in {n} days"},
+
+    # ── recommend_next ──
+    "all_done":             {"zh": "🎉 今日任务清零！\n所有任务都已完成，干得漂亮！",
+                             "en": "🎉 All tasks done!\nGreat job today!"},
+    "do_this_now":          {"zh": "🎯 现在做这个（{time}）：",
+                             "en": "🎯 Do this now ({time}):"},
+    "est_time":             {"zh": "预计 {n}min",                "en": "est. {n}min"},
+    "no_time_est":          {"zh": "未设定时间",                  "en": "no time estimate"},
+    "deadline_label":       {"zh": "📅 Deadline: {label}",      "en": "📅 Deadline: {label}"},
+    "priority_label":       {"zh": "🔥 优先级: {label}",        "en": "🔥 Priority: {label}"},
+    "suggested_steps":      {"zh": "💡 建议步骤：",              "en": "💡 Suggested steps:"},
+    "next_up":              {"zh": "⏭️ 做完之后：",              "en": "⏭️ Next up:"},
+    "remaining_tasks":      {"zh": "📊 剩余 {n} 个任务",        "en": "📊 {n} tasks remaining"},
+    "total_minutes":        {"zh": "，共约 {n}min",              "en": ", ~{n}min total"},
+
+    # ── generate_steps ──
+    "steps_write":          {"zh": ["打开相关文档/笔记", "花 5 分钟回顾之前的进展和大纲", "开始写作，先不追求完美"],
+                             "en": ["Open related docs/notes", "Spend 5 min reviewing progress and outline", "Start writing — don't aim for perfection"]},
+    "steps_search":         {"zh": ["明确搜索关键词和范围", "在目标平台上系统搜索", "整理结果到笔记中"],
+                             "en": ["Define search keywords and scope", "Systematically search on target platforms", "Organize results into notes"]},
+    "steps_organize":       {"zh": ["打开所有相关材料", "定义分类维度", "逐项归类并记录"],
+                             "en": ["Open all related materials", "Define classification dimensions", "Categorize items and record"]},
+    "steps_communicate":    {"zh": ["打开相关沟通工具", "组织要表达的要点", "发送并记录"],
+                             "en": ["Open communication tool", "Organize key points", "Send and log"]},
+    "steps_read":           {"zh": ["找到要阅读的材料", "带着问题阅读，标注重点", "写下 3 个关键要点"],
+                             "en": ["Locate the reading material", "Read with questions in mind, highlight key parts", "Write down 3 key takeaways"]},
+    "steps_default":        {"zh": ["明确完成标准", "执行第一个小步骤", "完成后检查是否达标"],
+                             "en": ["Clarify the definition of done", "Execute the first small step", "Check if it meets the standard"]},
+
+    # ── generate_review ──
+    "review_title":         {"zh": "## 📊 日终回顾（自动生成 {date}）",
+                             "en": "## 📊 Daily Review (auto-generated {date})"},
+    "completion_rate":      {"zh": "**📈 完成率：** {done}/{total}（{pct}%）",
+                             "en": "**📈 Completion rate:** {done}/{total} ({pct}%)"},
+    "completed_header":     {"zh": "**✅ 已完成：**",            "en": "**✅ Completed:**"},
+    "uncompleted_header":   {"zh": "**⬜ 未完成：**",            "en": "**⬜ Incomplete:**"},
+    "time_stats":           {"zh": "**⏱️ 时间统计：**",          "en": "**⏱️ Time stats:**"},
+    "completed_time":       {"zh": "- 已完成预估总时间：{n}min",  "en": "- Completed estimated time: {n}min"},
+    "uncompleted_time":     {"zh": "- 未完成预估总时间：{n}min",  "en": "- Incomplete estimated time: {n}min"},
+    "tomorrow_suggestion":  {"zh": "**💡 明日建议：**",           "en": "**💡 Tomorrow's suggestion:**"},
+    "inherit_count":        {"zh": "- {n} 个未完成任务将被继承到明天",
+                             "en": "- {n} incomplete tasks will carry over to tomorrow"},
+    "inherit_time":         {"zh": "- 预计需要 {n}min 完成剩余任务",
+                             "en": "- Estimated {n}min to finish remaining tasks"},
+    "all_done_tomorrow":    {"zh": "- 今天全部完成！明天可以开始新的任务 🎉",
+                             "en": "- All done today! Start fresh tomorrow 🎉"},
+
+    # ── create_today_file ──
+    "daily_title":          {"zh": "每日待办 - {date}",          "en": "Daily Tasks - {date}"},
+    "daily_heading":        {"zh": "📅 {date} {weekday} 每日待办",
+                             "en": "📅 {date} {weekday} Daily Tasks"},
+    "section_tasks":        {"zh": "📥 今日任务",                "en": "📥 Today's Tasks"},
+    "section_notes":        {"zh": "📝 备注",                    "en": "📝 Notes"},
+    "section_review":       {"zh": "📊 日终回顾",                "en": "📊 End of Day Review"},
+    "review_prompt":        {"zh": ["> *下班前填写*",
+                                    "> - 完成了什么？",
+                                    "> - 没完成什么？为什么？",
+                                    "> - 明天最重要的事是？"],
+                             "en": ["> *Fill before end of day*",
+                                    "> - What was completed?",
+                                    "> - What wasn't completed? Why?",
+                                    "> - What's most important tomorrow?"]},
+
+    # ── server.py 输出文本 ──
+    "srv_no_daily_file":    {"zh": "⚠️ 今日待办文件不存在: {file}\n先运行 inherit_tasks 或手动创建今日文件。",
+                             "en": "⚠️ Daily file not found: {file}\nRun inherit_tasks or create the file manually."},
+    "srv_no_tasks_yet":     {"zh": "📝 今日还没有添加任务。打开 Daily/{file} 添加今天的任务吧。",
+                             "en": "📝 No tasks added yet. Open Daily/{file} to add today's tasks."},
+    "srv_file_not_exist":   {"zh": "⚠️ 文件不存在: Daily/{file}",
+                             "en": "⚠️ File not found: Daily/{file}"},
+    "srv_file_header":      {"zh": "📄 Daily/{file}",
+                             "en": "📄 Daily/{file}"},
+    "srv_already_exists":   {"zh": "⚠️ 今日文件已存在: {file}，不会覆盖。",
+                             "en": "⚠️ Today's file already exists: {file}, will not overwrite."},
+    "srv_no_previous":      {"zh": "📭 未找到之前的待办文件。已创建空白的 {file}。",
+                             "en": "📭 No previous daily file found. Created blank {file}."},
+    "srv_all_completed":    {"zh": "🎉 {src} 中所有任务已完成！已创建空白的 {file}。",
+                             "en": "🎉 All tasks in {src} completed! Created blank {file}."},
+    "srv_inherit_done":     {"zh": "✅ 已创建 {file}\n继承自: {src}（{marked} 个任务已标记为已继承）\n继承任务数: {count}",
+                             "en": "✅ Created {file}\nInherited from: {src} ({marked} tasks marked as inherited)\nInherited tasks: {count}"},
+    "srv_no_overdue":       {"zh": "✅ 没有超期任务（截至 {date}），所有待办都已完成！",
+                             "en": "✅ No overdue tasks (as of {date}). All tasks completed!"},
+    "srv_overdue_found":    {"zh": "⚠️ 发现 {files} 个超期文件，共 {tasks} 个未完成任务：",
+                             "en": "⚠️ Found {files} overdue files with {tasks} incomplete tasks:"},
+    "srv_overdue_file":     {"zh": "📄 {date}.md（{days}天前）",
+                             "en": "📄 {date}.md ({days} days ago)"},
+    "srv_overdue_tip":      {"zh": "💡 建议：运行 inherit_tasks 将未完成项带到今天。",
+                             "en": "💡 Tip: Run inherit_tasks to bring incomplete tasks to today."},
+    "srv_no_task_record":   {"zh": "📝 今日没有任何任务记录。",
+                             "en": "📝 No task records for today."},
+    "srv_review_written":   {"zh": "✅ 回顾已写入 Daily/{file}",
+                             "en": "✅ Review written to Daily/{file}"},
+    "srv_split_ok":         {"zh": "✅ {date} 的所有任务预估时间合理，无需拆分。",
+                             "en": "✅ All tasks for {date} have reasonable time estimates."},
+    "srv_split_too_long":   {"zh": "✂️ 以下 {n} 个任务超过 80min，建议拆分：",
+                             "en": "✂️ {n} tasks exceed 80min, consider splitting:"},
+    "srv_split_no_est":     {"zh": "📝 以下 {n} 个任务缺少预估时间：",
+                             "en": "📝 {n} tasks missing time estimates:"},
+    "srv_split_tip":        {"zh": "💡 建议让 AI 帮你拆分大任务为多个 ≤ 45min 的子任务。",
+                             "en": "💡 Tip: Ask AI to split large tasks into ≤ 45min sub-tasks."},
+    "srv_history_title":    {"zh": "📊 最近 7 天任务完成统计",
+                             "en": "📊 Task completion stats — last 7 days"},
+    "srv_history_hdr":      {"zh": ["日期", "完成", "未完成", "完成率"],
+                             "en": ["Date", "Done", "Incomplete", "Rate"]},
+    "srv_no_file":          {"zh": "无文件", "en": "No file"},
+    "srv_no_tasks":         {"zh": "无任务", "en": "No tasks"},
+}
+
+
+def t(key: str, lang: str = "zh", **kwargs) -> str | list:
+    """从 I18N 字典取翻译文本。支持 {var} 占位符。"""
+    entry = I18N.get(key, {})
+    text = entry.get(lang, entry.get("zh", key))
+    if isinstance(text, str) and kwargs:
+        text = text.format(**kwargs)
+    return text
+
+
+# ============================================================
+# 常量（纯逻辑，不涉及语言）
 # ============================================================
 
 PRIORITY_WEIGHT = {
@@ -34,17 +179,16 @@ PRIORITY_MAP = {
     "🔽": "low",
 }
 
-PRIORITY_LABEL = {
-    "highest": "最高 ⏫",
-    "high": "高 🔼",
-    "medium": "普通",
-    "low": "低 🔽",
-}
 
-WEEKDAY_MAP = {
-    0: "周一", 1: "周二", 2: "周三", 3: "周四",
-    4: "周五", 5: "周六", 6: "周日",
-}
+def get_priority_label(priority: str, lang: str = "zh") -> str:
+    """获取优先级的本地化标签。"""
+    key = f"priority_{priority}"
+    return t(key, lang)
+
+
+def get_weekday(weekday_num: int, lang: str = "zh") -> str:
+    """获取星期的本地化名称。"""
+    return t(f"weekday_{weekday_num}", lang)
 
 
 # ============================================================
@@ -127,60 +271,60 @@ def rank_tasks(tasks: list[dict]) -> list[dict]:
     return sorted(tasks, key=sort_key)
 
 
-def generate_steps(task: dict) -> list[str]:
+def generate_steps(task: dict, lang: str = "zh") -> list[str]:
     """基于任务描述生成建议步骤（简单关键词匹配）。"""
     desc = task["description"]
 
-    if any(kw in desc for kw in ["写", "撰写", "完成"]):
-        return ["打开相关文档/笔记", "花 5 分钟回顾之前的进展和大纲", "开始写作，先不追求完美"]
-    elif any(kw in desc for kw in ["收集", "找", "搜索", "查"]):
-        return ["明确搜索关键词和范围", "在目标平台上系统搜索", "整理结果到笔记中"]
-    elif any(kw in desc for kw in ["整理", "归类", "分类", "梳理"]):
-        return ["打开所有相关材料", "定义分类维度", "逐项归类并记录"]
-    elif any(kw in desc for kw in ["回复", "发送", "邮件", "联系"]):
-        return ["打开相关沟通工具", "组织要表达的要点", "发送并记录"]
-    elif any(kw in desc for kw in ["读", "阅读", "看", "学习"]):
-        return ["找到要阅读的材料", "带着问题阅读，标注重点", "写下 3 个关键要点"]
+    if any(kw in desc for kw in ["写", "撰写", "完成", "write", "draft"]):
+        return t("steps_write", lang)
+    elif any(kw in desc for kw in ["收集", "找", "搜索", "查", "search", "find", "research"]):
+        return t("steps_search", lang)
+    elif any(kw in desc for kw in ["整理", "归类", "分类", "梳理", "organize", "sort", "categorize"]):
+        return t("steps_organize", lang)
+    elif any(kw in desc for kw in ["回复", "发送", "邮件", "联系", "reply", "send", "email", "contact"]):
+        return t("steps_communicate", lang)
+    elif any(kw in desc for kw in ["读", "阅读", "看", "学习", "read", "study", "learn"]):
+        return t("steps_read", lang)
     else:
-        return ["明确完成标准", "执行第一个小步骤", "完成后检查是否达标"]
+        return t("steps_default", lang)
 
 
-def format_deadline_label(days_until: int | None, deadline: str | None) -> str:
+def format_deadline_label(days_until: int | None, deadline: str | None, lang: str = "zh") -> str:
     """格式化 deadline 显示。"""
     if days_until is None or deadline is None:
-        return "无 deadline"
+        return t("no_deadline", lang)
     if days_until < 0:
-        return f"{deadline}（已超期 {abs(days_until)} 天！）"
+        return f"{deadline}（{t('overdue_days', lang, n=abs(days_until))}）"
     elif days_until == 0:
-        return f"{deadline}（今天！）"
+        return f"{deadline}（{t('deadline_today', lang)}）"
     elif days_until == 1:
-        return f"{deadline}（明天）"
+        return f"{deadline}（{t('deadline_tomorrow', lang)}）"
     else:
-        return f"{deadline}（{days_until} 天后）"
+        return f"{deadline}（{t('deadline_in_days', lang, n=days_until)}）"
 
 
-def format_recommendation(tasks: list[dict], today: datetime = None) -> str:
+def format_recommendation(tasks: list[dict], today: datetime = None, lang: str = "zh") -> str:
     """格式化推荐输出。"""
     today = today or datetime.now()
 
     if not tasks:
-        return "🎉 今日任务清零！\n所有任务都已完成，干得漂亮！"
+        return t("all_done", lang)
 
     top = tasks[0]
-    time_label = f"预计 {top['est_minutes']}min" if top["est_minutes"] else "未设定时间"
-    deadline_label = format_deadline_label(top["days_until"], top["deadline"])
-    priority_label = PRIORITY_LABEL.get(top["priority"], "普通")
-    steps = generate_steps(top)
+    time_label = t("est_time", lang, n=top["est_minutes"]) if top["est_minutes"] else t("no_time_est", lang)
+    deadline_label = format_deadline_label(top["days_until"], top["deadline"], lang)
+    priority_label = get_priority_label(top["priority"], lang)
+    steps = generate_steps(top, lang)
 
     lines = [
         "",
-        f"🎯 现在做这个（{time_label}）：",
+        t("do_this_now", lang, time=time_label),
         f"{top['description']}",
         "",
-        f"📅 Deadline: {deadline_label}",
-        f"🔥 优先级: {priority_label}",
+        t("deadline_label", lang, label=deadline_label),
+        t("priority_label", lang, label=priority_label),
         "",
-        "💡 建议步骤：",
+        t("suggested_steps", lang),
     ]
     for i, step in enumerate(steps, 1):
         lines.append(f"  {i}. {step}")
@@ -188,12 +332,15 @@ def format_recommendation(tasks: list[dict], today: datetime = None) -> str:
     if len(tasks) > 1:
         nxt = tasks[1]
         nxt_time = f"（{nxt['est_minutes']}min）" if nxt["est_minutes"] else ""
-        lines.extend(["", "⏭️ 做完之后：", f"  → {nxt['description']}{nxt_time}"])
+        lines.extend(["", t("next_up", lang), f"  → {nxt['description']}{nxt_time}"])
 
     remaining = len(tasks)
-    total_minutes = sum(t["est_minutes"] for t in tasks if t["est_minutes"])
+    total_minutes = sum(t_item["est_minutes"] for t_item in tasks if t_item["est_minutes"])
     lines.append("")
-    lines.append(f"📊 剩余 {remaining} 个任务" + (f"，共约 {total_minutes}min" if total_minutes else ""))
+    line = t("remaining_tasks", lang, n=remaining)
+    if total_minutes:
+        line += t("total_minutes", lang, n=total_minutes)
+    lines.append(line)
 
     return "\n".join(lines)
 
@@ -276,18 +423,24 @@ def create_today_file(
     today: datetime,
     inherited_tasks: list[str],
     source_date: str = None,
+    lang: str = "zh",
 ) -> Path:
     """创建今天的待办文件。"""
     date_str = today.strftime("%Y-%m-%d")
-    weekday = WEEKDAY_MAP[today.weekday()]
+    weekday = get_weekday(today.weekday(), lang)
     file_path = daily_dir / f"{date_str}.md"
 
-    yaml_lines = ["---", f"title: 每日待办 - {date_str}", f"date: {date_str}"]
+    yaml_lines = [
+        "---",
+        f"title: {t('daily_title', lang, date=date_str)}",
+        f"date: {date_str}",
+    ]
     if source_date:
         yaml_lines.append(f"inherited_from: {source_date}")
     yaml_lines.append("---")
 
-    body_lines = ["", f"# 📅 {date_str} {weekday} 每日待办", "", "## 📥 今日任务", ""]
+    heading = t("daily_heading", lang, date=date_str, weekday=weekday)
+    body_lines = ["", f"# {heading}", "", f"## {t('section_tasks', lang)}", ""]
 
     if inherited_tasks:
         for task in inherited_tasks:
@@ -297,13 +450,10 @@ def create_today_file(
         body_lines.append("")
 
     body_lines.extend([
-        "", "## 📝 备注", "", "", "",
-        "## 📊 日终回顾", "",
-        "> *下班前填写*",
-        "> - 完成了什么？",
-        "> - 没完成什么？为什么？",
-        "> - 明天最重要的事是？",
+        "", f"## {t('section_notes', lang)}", "", "", "",
+        f"## {t('section_review', lang)}", "",
     ])
+    body_lines.extend(t("review_prompt", lang))
 
     content = "\n".join(yaml_lines) + "\n" + "\n".join(body_lines) + "\n"
     file_path.write_text(content, encoding="utf-8")
@@ -327,7 +477,6 @@ def mark_tasks_inherited(file_path: Path, target_date: str) -> int:
     for i, line in enumerate(lines):
         stripped = line.strip()
         if stripped.startswith("- [ ] "):
-            # 保留原始缩进
             indent = line[: len(line) - len(line.lstrip())]
             task_text = stripped[6:]
             lines[i] = f"{indent}- [>] {task_text} ➡️ {target_date}"
@@ -379,51 +528,50 @@ def parse_all_tasks(content: str) -> tuple[list[dict], list[dict]]:
 
 
 def generate_review(
-    completed: list[dict], uncompleted: list[dict], today_str: str
+    completed: list[dict], uncompleted: list[dict], today_str: str, lang: str = "zh"
 ) -> str:
     """生成日终回顾 markdown 内容。"""
     total = len(completed) + len(uncompleted)
     pct = round(len(completed) / total * 100) if total > 0 else 0
 
-    completed_min = sum(t["est_minutes"] for t in completed if t["est_minutes"])
-    uncompleted_min = sum(t["est_minutes"] for t in uncompleted if t["est_minutes"])
+    completed_min = sum(t_item["est_minutes"] for t_item in completed if t_item["est_minutes"])
+    uncompleted_min = sum(t_item["est_minutes"] for t_item in uncompleted if t_item["est_minutes"])
 
     lines = [
-        f"## 📊 日终回顾（自动生成 {today_str}）",
+        t("review_title", lang, date=today_str),
         "",
-        f"**📈 完成率：** {len(completed)}/{total}（{pct}%）",
+        t("completion_rate", lang, done=len(completed), total=total, pct=pct),
         "",
     ]
 
     if completed:
-        lines.append("**✅ 已完成：**")
-        for t in completed:
-            time_str = f"（{t['est_minutes']}min）" if t["est_minutes"] else ""
-            lines.append(f"- {t['description']}{time_str}")
+        lines.append(t("completed_header", lang))
+        for item in completed:
+            time_str = f"（{item['est_minutes']}min）" if item["est_minutes"] else ""
+            lines.append(f"- {item['description']}{time_str}")
         lines.append("")
 
     if uncompleted:
-        lines.append("**⬜ 未完成：**")
-        for t in uncompleted:
-            time_str = f"（{t['est_minutes']}min）" if t["est_minutes"] else ""
-            lines.append(f"- {t['description']}{time_str}")
+        lines.append(t("uncompleted_header", lang))
+        for item in uncompleted:
+            time_str = f"（{item['est_minutes']}min）" if item["est_minutes"] else ""
+            lines.append(f"- {item['description']}{time_str}")
         lines.append("")
 
     lines.extend([
-        "**⏱️ 时间统计：**",
-        f"- 已完成预估总时间：{completed_min}min",
-        f"- 未完成预估总时间：{uncompleted_min}min",
+        t("time_stats", lang),
+        t("completed_time", lang, n=completed_min),
+        t("uncompleted_time", lang, n=uncompleted_min),
         "",
     ])
 
+    lines.append(t("tomorrow_suggestion", lang))
     if uncompleted:
-        lines.append("**💡 明日建议：**")
-        lines.append(f"- {len(uncompleted)} 个未完成任务将被继承到明天")
+        lines.append(t("inherit_count", lang, n=len(uncompleted)))
         if uncompleted_min > 0:
-            lines.append(f"- 预计需要 {uncompleted_min}min 完成剩余任务")
+            lines.append(t("inherit_time", lang, n=uncompleted_min))
     else:
-        lines.append("**💡 明日建议：**")
-        lines.append("- 今天全部完成！明天可以开始新的任务 🎉")
+        lines.append(t("all_done_tomorrow", lang))
 
     return "\n".join(lines)
 
