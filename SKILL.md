@@ -20,22 +20,10 @@ A personal task management MCP Server. Deterministic operations (parsing, sortin
 ```bash
 git clone https://github.com/AsuraNale/daily-assistant-mcp.git
 cd daily-assistant-mcp
-pip install fastmcp
-python3 src/setup.py   # Windows: py src/setup.py
+python3 src/setup.py --auto   # Windows: py src/setup.py --auto
 ```
 
-The setup wizard creates your data directory and config. Then add to `.mcp.json`:
-
-```json
-{
-  "mcpServers": {
-    "daily-assistant": {
-      "command": "python3",
-      "args": ["-X", "utf8", "/path/to/daily-assistant-mcp/src/server.py"]
-    }
-  }
-}
-```
+The setup wizard creates a `.venv`, installs dependencies, sets up your data directory, and auto-configures your AI editor. No manual `pip install` or config editing needed.
 
 ## Tools
 

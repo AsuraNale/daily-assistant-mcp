@@ -1,30 +1,81 @@
 """
-日常小助手 MCP Server — 初始化脚本 v2
+日常小助手 MCP Server — 初始化脚本 v3
 
 两种模式：
-  --auto    全自动（零交互，默认路径，自动配置已安装的编辑器）
+  --auto    全自动（零交互，默认路径，自动创建 venv，自动配置编辑器）
   无参数     交互式（询问路径，打印配置模板）
 
 自动完成：
-1. 创建数据目录（Daily/ + Dashboard.md）
-2. 生成 config.json
-3. 检测已安装的 AI 编辑器，自动写入 MCP 配置
+1. 创建 .venv 并安装 fastmcp（用户无需手动 pip install）
+2. 创建数据目录（Daily/ + Dashboard.md）
+3. 生成 config.json
+4. 检测已安装的 AI 编辑器，自动写入 MCP 配置
 
 支持的编辑器：Claude Code / Cursor / Kiro / Windsurf
 
-用法:
-    Windows:  py src/setup.py --auto
-    macOS:    python3 src/setup.py --auto
+用法（一条命令搞定）:
+    macOS/Linux:  git clone ... && cd ... && python3 src/setup.py --auto
+    Windows:      git clone ... && cd ... && py src/setup.py --auto
 """
 
 import json
+import os
 import platform
 import shutil
+import subprocess
 import sys
+import venv
 from pathlib import Path
 
 SCRIPT_DIR = Path(__file__).parent.resolve()
+PROJECT_DIR = SCRIPT_DIR.parent
 SERVER_PATH = SCRIPT_DIR / "server.py"
+VENV_DIR = PROJECT_DIR / ".venv"
+
+
+# ─── venv + fastmcp 安装 ─────────────────────────────────────
+
+def get_venv_python() -> Path:
+    """获取 .venv 中的 Python 可执行文件路径。"""
+    if platform.system() == "Windows":
+        return VENV_DIR / "Scripts" / "python.exe"
+    return VENV_DIR / "bin" / "python3"
+
+
+def ensure_venv() -> Path:
+    """确保 .venv 存在并安装 fastmcp，返回 venv 的 python 路径。"""
+    venv_python = get_venv_python()
+
+    if venv_python.exists():
+        print(f"   ⏭️  .venv 已存在: {VENV_DIR}")
+    else:
+        print(f"   📦 创建虚拟环境: {VENV_DIR}")
+        venv.create(str(VENV_DIR), with_pip=True)
+        print(f"   ✅ .venv 已创建")
+
+    # 检查 fastmcp 是否已安装
+    check = subprocess.run(
+        [str(venv_python), "-c", "import fastmcp"],
+        capture_output=True,
+    )
+    if check.returncode == 0:
+        print(f"   ⏭️  fastmcp 已安装")
+    else:
+        print(f"   📦 安装 fastmcp...")
+        result = subprocess.run(
+            [str(venv_python), "-m", "pip", "install", "fastmcp"],
+            capture_output=True,
+            text=True,
+        )
+        if result.returncode == 0:
+            print(f"   ✅ fastmcp 安装成功")
+        else:
+            print(f"   ❌ fastmcp 安装失败:")
+            print(f"      {result.stderr.strip()}")
+            sys.exit(1)
+
+    return venv_python
+
 
 # ─── AI 编辑器 MCP 配置映射 ───────────────────────────────────
 
@@ -63,16 +114,24 @@ EDITORS = [
 # ─── 工具函数 ─────────────────────────────────────────────────
 
 def detect_python_cmd() -> str:
-    """检测当前 OS 的 Python 命令。"""
+    """检测当前 OS 的 Python 命令（用于非 venv 场景提示）。"""
     if platform.system() == "Windows":
         return "py"
     return "python3"
 
 
-def build_mcp_entry() -> dict:
-    """构建 daily-assistant 的 MCP Server 配置条目。"""
+def build_mcp_entry(venv_python: Path | None = None) -> dict:
+    """构建 daily-assistant 的 MCP Server 配置条目。
+
+    如果提供了 venv_python，使用 venv 的 python；否则使用系统 python。
+    """
+    if venv_python and venv_python.exists():
+        command = str(venv_python)
+    else:
+        command = detect_python_cmd()
+
     return {
-        "command": detect_python_cmd(),
+        "command": command,
         "args": ["-X", "utf8", str(SERVER_PATH)],
     }
 
@@ -119,9 +178,9 @@ def merge_mcp_config(config_path: Path, entry: dict, create_parents: bool) -> No
     )
 
 
-def configure_editors() -> tuple[list[str], list[str]]:
+def configure_editors(venv_python: Path | None = None) -> tuple[list[str], list[str]]:
     """检测并配置所有已安装的 AI 编辑器。返回 (已配置列表, 跳过列表)。"""
-    entry = build_mcp_entry()
+    entry = build_mcp_entry(venv_python)
     configured = []
     skipped = []
 
@@ -200,9 +259,9 @@ def create_config(data_dir: Path) -> None:
 
 # ─── 输出提示 ─────────────────────────────────────────────────
 
-def print_manual_config() -> None:
+def print_manual_config(venv_python: Path | None = None) -> None:
     """打印手动配置模板（未检测到编辑器时使用）。"""
-    entry = build_mcp_entry()
+    entry = build_mcp_entry(venv_python)
     mcp_json = {"mcpServers": {"daily-assistant": entry}}
 
     print(f"\n📝 手动配置模板（复制到你的编辑器 MCP 配置文件）：")
@@ -232,6 +291,7 @@ def print_next_steps_interactive(data_dir: Path) -> None:
 
     print(f"\n📦 步骤 1: 安装 fastmcp")
     print(f"   {python_cmd} -m pip install fastmcp")
+    print(f"   或使用 --auto 模式自动创建 venv 并安装")
 
     print(f"\n📝 步骤 2: 配置你的 AI 编辑器")
     print(f"   将以下 JSON 合并到编辑器的 MCP 配置文件中：")
@@ -268,8 +328,14 @@ def main():
     print(f"   Python: {sys.version.split()[0]}")
     print(f"   脚本目录: {SCRIPT_DIR}")
 
-    # ── 1. 数据目录 ──
+    venv_python = None
+
     if auto_mode:
+        # ── 1. venv + fastmcp ──
+        print(f"\n🐍 配置 Python 环境...")
+        venv_python = ensure_venv()
+
+        # ── 2. 数据目录 ──
         data_dir = Path.home() / "Desktop" / "日常小助手"
     else:
         data_dir = prompt_data_dir()
@@ -277,17 +343,17 @@ def main():
     print(f"\n📂 创建数据目录...")
     create_data_dir(data_dir)
 
-    # ── 2. config.json ──
+    # ── 3. config.json ──
     print(f"\n⚙️  生成配置文件...")
     create_config(data_dir)
 
-    # ── 3. 编辑器配置 ──
+    # ── 4. 编辑器配置 ──
     if auto_mode:
         print(f"\n🔍 检测已安装的 AI 编辑器...")
-        configured, skipped = configure_editors()
+        configured, skipped = configure_editors(venv_python)
 
         if not configured:
-            print_manual_config()
+            print_manual_config(venv_python)
 
         print(f"\n{'='*50}")
         print(f"🎉 全部完成！")

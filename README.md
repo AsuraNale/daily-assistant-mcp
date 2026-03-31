@@ -36,13 +36,14 @@ A personal task management MCP Server that works with Claude Code, OpenClaw, and
 
 ```bash
 # macOS / Linux
-git clone https://github.com/AsuraNale/daily-assistant-mcp.git && cd daily-assistant-mcp && pip install fastmcp && python3 src/setup.py --auto
+git clone https://github.com/AsuraNale/daily-assistant-mcp.git && cd daily-assistant-mcp && python3 src/setup.py --auto
 
 # Windows
-git clone https://github.com/AsuraNale/daily-assistant-mcp.git && cd daily-assistant-mcp && pip install fastmcp && py src/setup.py --auto
+git clone https://github.com/AsuraNale/daily-assistant-mcp.git && cd daily-assistant-mcp && py src/setup.py --auto
 ```
 
-That's it. The setup wizard automatically:
+That's it. No manual `pip install` needed. The setup wizard automatically:
+- Creates `.venv` and installs `fastmcp` (isolated, no system pollution)
 - Creates data directory (`~/Desktop/日常小助手/Daily/` + `Dashboard.md`)
 - Generates `config.json`
 - Detects installed AI editors and writes MCP config for each one
